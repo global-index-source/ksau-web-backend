@@ -17,8 +17,6 @@ import (
 const (
 	// 5GB max file size
 	MaxFileSize = 5 * 1024 * 1024 * 1024
-	// Maximum parallel chunks for upload
-	MaxParallelChunks = 4
 )
 
 // Root folders for each remote configuration
@@ -201,14 +199,14 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	remoteFilePath := filepath.Join(rootFolders[remote], remoteFolder, filename)
 	log.Printf("Remote file path: %s", remoteFilePath)
 
-	// Upload parameters with parallel chunk support
+	// Upload parameters with sequential chunk upload
 	params := azure.UploadParams{
 		FilePath:       tempFile.Name(),
 		RemoteFilePath: remoteFilePath,
 		ChunkSize:      chunkSize,
-		ParallelChunks: MaxParallelChunks,
-		MaxRetries:     3,
-		RetryDelay:     5 * time.Second,
+		ParallelChunks: 1,                // Disable parallel uploads to avoid eTag conflicts
+		MaxRetries:     5,                // Increase retries
+		RetryDelay:     10 * time.Second, // Increase delay between retries
 		AccessToken:    client.AccessToken,
 	}
 
