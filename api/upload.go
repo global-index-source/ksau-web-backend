@@ -14,6 +14,15 @@ import (
 	"github.com/ksauraj/ksau-oned-api/azure"
 )
 
+const (
+	// 1GB max file size
+	MaxFileSize = 1024 * 1024 * 1024
+	// 100MB for form parsing in memory
+	MaxMemory = 100 << 20
+	// Maximum parallel chunks for upload
+	MaxParallelChunks = 4
+)
+
 // Root folders for each remote configuration
 var rootFolders = map[string]string{
 	"hakimionedrive": "Public",
@@ -47,8 +56,13 @@ func sendErrorResponse(w http.ResponseWriter, statusCode int, err error, message
 
 // validateRequest validates the upload request
 func validateRequest(r *http.Request) error {
-	if r.ContentLength > 100<<20 { // 100MB limit
-		return fmt.Errorf("file too large: %d bytes", r.ContentLength)
+	contentLength := r.ContentLength
+	if contentLength > MaxFileSize {
+		return fmt.Errorf("file too large: %d bytes (max %d bytes)", contentLength, MaxFileSize)
+	}
+
+	if contentLength <= 0 {
+		return fmt.Errorf("invalid content length: %d", contentLength)
 	}
 
 	remote := r.FormValue("remote")
@@ -119,8 +133,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Printf("Parsing multipart form...")
-	// Parse form data with a reasonable memory limit
-	err = r.ParseMultipartForm(10 << 20) // 10 MB max memory
+	// Parse form data with increased memory limit
+	err = r.ParseMultipartForm(MaxMemory)
 	if err != nil {
 		sendErrorResponse(w, http.StatusBadRequest, err, "Unable to parse form data")
 		return
@@ -166,9 +180,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Cleaned up temporary file: %s", tempFile.Name())
 	}()
 
-	// Copy the uploaded file content
+	// Copy the uploaded file content with progress tracking
 	log.Printf("Copying file content...")
-	written, err := io.Copy(tempFile, file)
+	written, err := io.Copy(tempFile, io.TeeReader(file, &progressWriter{
+		total:     header.Size,
+		processed: 0,
+	}))
 	if err != nil {
 		sendErrorResponse(w, http.StatusInternalServerError, err, "Unable to save file")
 		return
@@ -185,12 +202,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	remoteFilePath := filepath.Join(rootFolders[remote], remoteFolder, finalRemoteFileName)
 	log.Printf("Remote file path: %s", remoteFilePath)
 
-	// Upload parameters
+	// Upload parameters with parallel chunk support
 	params := azure.UploadParams{
 		FilePath:       tempFile.Name(),
 		RemoteFilePath: remoteFilePath,
 		ChunkSize:      chunkSize,
-		ParallelChunks: 1, // Disable parallel uploads
+		ParallelChunks: MaxParallelChunks,
 		MaxRetries:     3,
 		RetryDelay:     5 * time.Second,
 		AccessToken:    client.AccessToken,
@@ -221,4 +238,18 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(response)
 	log.Printf("Request completed successfully")
+}
+
+// progressWriter tracks upload progress
+type progressWriter struct {
+	total     int64
+	processed int64
+}
+
+func (pw *progressWriter) Write(p []byte) (int, error) {
+	n := len(p)
+	pw.processed += int64(n)
+	progress := float64(pw.processed) / float64(pw.total) * 100
+	log.Printf("Upload progress: %.2f%% (%d/%d bytes)", progress, pw.processed, pw.total)
+	return n, nil
 }

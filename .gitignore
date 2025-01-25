@@ -14,6 +14,10 @@
 rclone.conf
 *.bak
 
+# Docker
+/docker-compose.override.yml
+/.docker
+
 # Dependency directories
 vendor/
 

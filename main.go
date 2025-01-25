@@ -6,11 +6,44 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"syscall"
 	"time"
 
 	"github.com/ksauraj/ksau-oned-api/api"
 )
+
+const (
+	defaultReadTimeout  = 10 * time.Minute
+	defaultWriteTimeout = 10 * time.Minute
+	defaultIdleTimeout  = 120 * time.Second
+)
+
+func getEnvWithDefault(key string, defaultValue string) string {
+	if value := os.Getenv(key); value != "" {
+		return value
+	}
+	return defaultValue
+}
+
+func getEnvDurationWithDefault(key string, defaultValue time.Duration) time.Duration {
+	strValue := getEnvWithDefault(key, "")
+	if strValue == "" {
+		return defaultValue
+	}
+
+	// Try to parse as seconds
+	if seconds, err := strconv.Atoi(strValue); err == nil {
+		return time.Duration(seconds) * time.Second
+	}
+
+	// Try to parse as duration string
+	if duration, err := time.ParseDuration(strValue); err == nil {
+		return duration
+	}
+
+	return defaultValue
+}
 
 func main() {
 	// Set up logging
@@ -26,22 +59,35 @@ func main() {
 		api.Handler(w, r)
 	})
 
+	// Get server timeouts from environment variables
+	readTimeout := getEnvDurationWithDefault("SERVER_READ_TIMEOUT", defaultReadTimeout)
+	writeTimeout := getEnvDurationWithDefault("SERVER_WRITE_TIMEOUT", defaultWriteTimeout)
+	idleTimeout := getEnvDurationWithDefault("SERVER_IDLE_TIMEOUT", defaultIdleTimeout)
+
 	// Create server with timeouts
-	port := "8080"
+	addr := getEnvWithDefault("SERVER_ADDR", "0.0.0.0:8080")
 	server := &http.Server{
-		Addr:         ":" + port,
+		Addr:         addr,
 		Handler:      mux,
-		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
-		IdleTimeout:  120 * time.Second,
+		ReadTimeout:  readTimeout,
+		WriteTimeout: writeTimeout,
+		IdleTimeout:  idleTimeout,
+		// Increase maximum header size to 10MB
+		MaxHeaderBytes: 10 << 20,
 	}
+
+	log.Printf("Server configuration:")
+	log.Printf("- Address: %s", addr)
+	log.Printf("- Read Timeout: %v", readTimeout)
+	log.Printf("- Write Timeout: %v", writeTimeout)
+	log.Printf("- Idle Timeout: %v", idleTimeout)
 
 	// Channel to receive errors from the server
 	serverErrors := make(chan error, 1)
 
 	// Start server in a goroutine
 	go func() {
-		log.Printf("Local development server starting on port %s...\n", port)
+		log.Printf("Server listening on %s...\n", addr)
 		serverErrors <- server.ListenAndServe()
 	}()
 
@@ -60,7 +106,7 @@ func main() {
 		log.Printf("Start shutdown... Signal: %v", sig)
 
 		// Create context with timeout for graceful shutdown
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
 		// Attempt graceful shutdown
