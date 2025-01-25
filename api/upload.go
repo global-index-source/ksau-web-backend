@@ -15,10 +15,8 @@ import (
 )
 
 const (
-	// 1GB max file size
-	MaxFileSize = 1024 * 1024 * 1024
-	// 100MB for form parsing in memory
-	MaxMemory = 100 << 20
+	// 5GB max file size
+	MaxFileSize = 5 * 1024 * 1024 * 1024
 	// Maximum parallel chunks for upload
 	MaxParallelChunks = 4
 )
@@ -52,35 +50,6 @@ func sendErrorResponse(w http.ResponseWriter, statusCode int, err error, message
 		Error:   message,
 		Details: err.Error(),
 	})
-}
-
-// validateRequest validates the upload request
-func validateRequest(r *http.Request) error {
-	contentLength := r.ContentLength
-	if contentLength > MaxFileSize {
-		return fmt.Errorf("file too large: %d bytes (max %d bytes)", contentLength, MaxFileSize)
-	}
-
-	if contentLength <= 0 {
-		return fmt.Errorf("invalid content length: %d", contentLength)
-	}
-
-	remote := r.FormValue("remote")
-	if remote == "" {
-		return fmt.Errorf("remote is required")
-	}
-
-	if _, ok := rootFolders[remote]; !ok {
-		return fmt.Errorf("invalid remote: %s", remote)
-	}
-
-	chunkSizeStr := r.FormValue("chunkSize")
-	chunkSize, err := strconv.ParseInt(chunkSizeStr, 10, 64)
-	if err != nil || chunkSize < 2 || chunkSize > 16 {
-		return fmt.Errorf("invalid chunk size: must be between 2 and 16")
-	}
-
-	return nil
 }
 
 // Handler is the main API handler for file uploads
@@ -123,53 +92,89 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	var (
+		remote        string
+		remoteFolder  string
+		filename      string
+		chunkSizeStr  string
+		file          io.ReadCloser
+		contentLength int64
+	)
+
+	contentType := r.Header.Get("Content-Type")
+	if contentType == "application/octet-stream" {
+		// Binary upload mode
+		remote = r.Header.Get("X-Remote")
+		remoteFolder = r.Header.Get("X-Remote-Folder")
+		filename = r.Header.Get("X-Filename")
+		chunkSizeStr = r.Header.Get("X-Chunk-Size")
+		file = r.Body
+		contentLength = r.ContentLength
+	} else {
+		// Traditional form upload mode
+		err = r.ParseMultipartForm(10 << 20) // 10MB for form data
+		if err != nil {
+			sendErrorResponse(w, http.StatusBadRequest, err, "Unable to parse form data")
+			return
+		}
+		defer r.MultipartForm.RemoveAll()
+
+		remote = r.FormValue("remote")
+		remoteFolder = r.FormValue("remoteFolder")
+		chunkSizeStr = r.FormValue("chunkSize")
+
+		uploadedFile, header, err := r.FormFile("file")
+		if err != nil {
+			sendErrorResponse(w, http.StatusBadRequest, err, "Unable to read file")
+			return
+		}
+		defer uploadedFile.Close()
+
+		file = uploadedFile
+		filename = header.Filename
+		contentLength = header.Size
+	}
+
+	// Validate parameters
+	if remote == "" {
+		sendErrorResponse(w, http.StatusBadRequest, fmt.Errorf("remote is required"), "Invalid request")
+		return
+	}
+
+	if _, ok := rootFolders[remote]; !ok {
+		sendErrorResponse(w, http.StatusBadRequest, fmt.Errorf("invalid remote: %s", remote), "Invalid request")
+		return
+	}
+
+	if filename == "" {
+		sendErrorResponse(w, http.StatusBadRequest, fmt.Errorf("filename is required"), "Invalid request")
+		return
+	}
+
+	if chunkSizeStr == "" {
+		sendErrorResponse(w, http.StatusBadRequest, fmt.Errorf("chunk size is required"), "Invalid request")
+		return
+	}
+
+	chunkSize, err := strconv.ParseInt(chunkSizeStr, 10, 64)
+	if err != nil || chunkSize < 2 || chunkSize > 32 {
+		sendErrorResponse(w, http.StatusBadRequest, fmt.Errorf("invalid chunk size: must be between 2 and 32"), "Invalid request")
+		return
+	}
+	chunkSize *= 1024 * 1024 // Convert MB to bytes
+
 	log.Printf("Initializing Azure client...")
-	// Initialize AzureClient for the default remote configuration
-	remoteConfig := "oned" // Default remote configuration
-	client, err := azure.NewAzureClientFromRcloneConfigData(configData, remoteConfig)
+	// Initialize AzureClient for the remote configuration
+	client, err := azure.NewAzureClientFromRcloneConfigData(configData, remote)
 	if err != nil {
 		sendErrorResponse(w, http.StatusInternalServerError, err, "Failed to initialize Azure client")
 		return
 	}
 
-	log.Printf("Parsing multipart form...")
-	// Parse form data with increased memory limit
-	err = r.ParseMultipartForm(MaxMemory)
-	if err != nil {
-		sendErrorResponse(w, http.StatusBadRequest, err, "Unable to parse form data")
-		return
-	}
-	defer r.MultipartForm.RemoveAll() // Clean up parsed files
+	log.Printf("Processing upload for remote: %s, folder: %s, file: %s", remote, remoteFolder, filename)
 
-	// Validate request
-	if err := validateRequest(r); err != nil {
-		sendErrorResponse(w, http.StatusBadRequest, err, "Invalid request")
-		return
-	}
-
-	// Get form values
-	remote := r.FormValue("remote")
-	remoteFolder := r.FormValue("remoteFolder")
-	remoteFileName := r.FormValue("remoteFileName")
-	chunkSizeStr := r.FormValue("chunkSize")
-
-	log.Printf("Processing upload for remote: %s, folder: %s", remote, remoteFolder)
-
-	// Parse chunk size
-	chunkSize, _ := strconv.ParseInt(chunkSizeStr, 10, 64)
-	chunkSize *= 1024 * 1024 // Convert MB to bytes
-
-	// Get the uploaded file
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		sendErrorResponse(w, http.StatusBadRequest, err, "Unable to read file")
-		return
-	}
-	defer file.Close()
-
-	log.Printf("Creating temporary file for: %s (%d bytes)", header.Filename, header.Size)
 	// Create a temporary file with a meaningful prefix
-	tempFile, err := os.CreateTemp("", fmt.Sprintf("upload-%s-*.tmp", filepath.Base(header.Filename)))
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("upload-%s-*.tmp", filepath.Base(filename)))
 	if err != nil {
 		sendErrorResponse(w, http.StatusInternalServerError, err, "Unable to create temp file")
 		return
@@ -180,10 +185,10 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Cleaned up temporary file: %s", tempFile.Name())
 	}()
 
-	// Copy the uploaded file content with progress tracking
+	// Copy the file content with progress tracking
 	log.Printf("Copying file content...")
 	written, err := io.Copy(tempFile, io.TeeReader(file, &progressWriter{
-		total:     header.Size,
+		total:     contentLength,
 		processed: 0,
 	}))
 	if err != nil {
@@ -192,14 +197,8 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 	}
 	log.Printf("Copied %d bytes to temporary file", written)
 
-	// Determine the remote file name
-	finalRemoteFileName := header.Filename
-	if remoteFileName != "" {
-		finalRemoteFileName = remoteFileName
-	}
-
 	// Construct the remote file path
-	remoteFilePath := filepath.Join(rootFolders[remote], remoteFolder, finalRemoteFileName)
+	remoteFilePath := filepath.Join(rootFolders[remote], remoteFolder, filename)
 	log.Printf("Remote file path: %s", remoteFilePath)
 
 	// Upload parameters with parallel chunk support
@@ -224,7 +223,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 
 	// Generate the download URL
 	baseURL := baseURLs[remote]
-	downloadURL := fmt.Sprintf("%s/%s/%s", baseURL, remoteFolder, finalRemoteFileName)
+	downloadURL := fmt.Sprintf("%s/%s/%s", baseURL, remoteFolder, filename)
 
 	// Return success response
 	response := map[string]interface{}{
@@ -232,7 +231,7 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		"message":     "File uploaded successfully",
 		"downloadURL": downloadURL,
 		"fileSize":    written,
-		"fileName":    finalRemoteFileName,
+		"fileName":    filename,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

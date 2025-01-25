@@ -2,44 +2,49 @@
 
 A serverless API service for uploading files to OneDrive with support for multiple remote configurations.
 
-## File Size Limits & Performance
+## File Handling & Limits
 
-### Default Limits
-- Maximum file size: 1GB
-- In-memory parsing limit: 100MB
-- Chunk size options: 2MB to 16MB
-- Parallel uploads: Up to 4 chunks simultaneously
+### Capabilities
+- Maximum file size: 5GB
+- Binary file upload (supports all file types)
+- Chunk sizes: 2MB to 32MB
+- Parallel uploads: Up to 4 chunks
+- Progress tracking
 
-### Configurable Timeouts
+### Timeouts
 - Read timeout: 10 minutes
 - Write timeout: 10 minutes
 - Idle timeout: 2 minutes
-
-### Environment Variables
-```bash
-# Server configuration
-SERVER_READ_TIMEOUT=600s    # For handling large file uploads
-SERVER_WRITE_TIMEOUT=600s   # For handling large file responses
-SERVER_IDLE_TIMEOUT=120s    # Connection idle timeout
-SERVER_ADDR=0.0.0.0:8080   # Server binding address
-```
 
 ## API Endpoint
 
 ### POST /upload
 
-Upload a file to OneDrive.
+Upload any file to OneDrive as binary data.
 
-**Request Format:**
-- Content-Type: `multipart/form-data`
-- Maximum file size: 1GB
+**Headers:**
+```
+Content-Type: application/octet-stream
+X-Remote: [remote name] (required) - One of: hakimionedrive, oned, saurajcf
+X-Filename: [filename] (required) - Name for the uploaded file
+X-Remote-Folder: [folder path] (optional) - Target folder in OneDrive
+X-Chunk-Size: [size in MB] (required) - Chunk size (2-32)
+```
 
-**Form Fields:**
-- `file`: (required) The file to upload
-- `remote`: (required) Remote configuration to use (`hakimionedrive`, `oned`, or `saurajcf`)
-- `remoteFolder`: (optional) Folder path in OneDrive where the file should be uploaded
-- `remoteFileName`: (optional) Custom name for the uploaded file
-- `chunkSize`: (required) Upload chunk size in MB (2, 4, 8, or 16)
+**Request Body:**
+- Raw binary file content
+
+**Example using cURL:**
+```bash
+curl -X POST \
+  -H "Content-Type: application/octet-stream" \
+  -H "X-Remote: oned" \
+  -H "X-Filename: example.pdf" \
+  -H "X-Remote-Folder: documents" \
+  -H "X-Chunk-Size: 8" \
+  --data-binary "@/path/to/file.pdf" \
+  http://localhost:8080/upload
+```
 
 **Success Response:**
 ```json
@@ -76,7 +81,7 @@ Upload a file to OneDrive.
 - CPU: 2 cores or more
 - Network: High-speed internet connection
 
-### Option 1: Docker Deployment
+### Docker Deployment
 
 1. Clone the repository
 ```bash
@@ -104,27 +109,7 @@ To stop the service:
 docker-compose down
 ```
 
-### Option 2: Vercel Deployment
-
-Note: Vercel has its own limitations:
-- Maximum file size: 50MB
-- Execution timeout: 10 seconds
-- Memory: 1024MB
-
-1. Clone this repository
-```bash
-git clone https://github.com/ksauraj/ksau-oned-api.git
-cd ksau-oned-api
-```
-
-2. Add your rclone.conf file to the project root
-
-3. Deploy to Vercel
-```bash
-vercel
-```
-
-### Option 3: Local Development
+### Local Development
 
 1. Clone the repository and add your rclone.conf file
 
@@ -135,60 +120,77 @@ go run main.go
 
 ## Performance Optimization
 
-### Chunk Size Selection
-- Small files (< 100MB): 2MB chunks
-- Medium files (100MB - 500MB): 4MB or 8MB chunks
-- Large files (> 500MB): 16MB chunks
+### Chunk Size Selection Guidelines
+- Small files (< 100MB): 2-4MB chunks
+- Medium files (100MB - 1GB): 8-16MB chunks
+- Large files (> 1GB): 16-32MB chunks
 
-### Parallel Upload
-- The API uses up to 4 parallel chunks for faster uploads
-- Automatically manages memory usage
-- Includes progress tracking
+### Upload Performance
+- Parallel processing: 4 chunks simultaneously
+- Progress tracking for large files
+- Automatic retry on failures
+- Memory-efficient binary handling
 
-### Memory Management
-- Efficient temp file handling
-- Automatic cleanup
-- Progress monitoring
-- Memory limit enforcement
+## Error Handling and Security
 
-## Error Handling and Logging
-
-The API includes comprehensive error handling and logging:
-- Request validation with detailed error messages
-- File size and type validation
+### Error Handling
+- Detailed error messages
 - Upload progress tracking
-- Detailed logging of upload process
-- Proper cleanup of temporary files
-- Memory limits to prevent server overload
+- Automatic cleanup of temporary files
+- Comprehensive request validation
 
-## Security
+### Security Features
+- Binary file handling (no file type restrictions)
+- Request size validation
+- Memory usage controls
+- Temporary file cleanup
+- Read-only configuration mounting
 
-- The API uses CORS headers to allow requests from any origin
-- Request size limits and validations
-- Proper cleanup of temporary files
-- Memory usage limits
-- Keep your rclone.conf secure and never commit it to version control
-- Docker deployment uses read-only mount for rclone.conf
+## Configuration
 
-## Limitations
+The API supports multiple OneDrive remotes:
 
-1. File Size:
-   - Maximum file size: 1GB (configurable)
-   - Memory parsing limit: 100MB
-   - Vercel deployment limited to 50MB
+```go
+var rootFolders = map[string]string{
+    "hakimionedrive": "Public",
+    "oned":           "",
+    "saurajcf":       "MY_BOMT_STUFFS",
+}
 
-2. Timeouts:
-   - Default read/write timeout: 10 minutes
-   - Can be extended via environment variables
+var baseURLs = map[string]string{
+    "hakimionedrive": "https://onedrive-vercel-index-kohl-eight-30.vercel.app",
+    "oned":           "https://index.sauraj.eu.org",
+    "saurajcf":       "https://my-index-azure.vercel.app",
+}
+```
 
-3. Resources:
-   - Memory usage depends on chunk size and parallel uploads
-   - Temporary storage needed for file processing
-   - Network bandwidth affects upload speed
+## Environment Variables
 
-4. Rate Limiting:
-   - OneDrive API has its own rate limits
-   - Consider implementing rate limiting for production use
+```bash
+# Server configuration
+SERVER_READ_TIMEOUT=600s    # For handling large file uploads
+SERVER_WRITE_TIMEOUT=600s   # For handling large responses
+SERVER_IDLE_TIMEOUT=120s    # Connection idle timeout
+SERVER_ADDR=0.0.0.0:8080   # Server binding address
+```
+
+## Advantages of Binary Upload
+
+1. Efficiency:
+   - No multipart form overhead
+   - Direct binary data handling
+   - Reduced memory usage
+   - Better performance for large files
+
+2. Compatibility:
+   - Works with any file type
+   - No content-type restrictions
+   - Consistent handling of all files
+
+3. Simplicity:
+   - Straightforward API
+   - Simple client implementation
+   - Clear error handling
 
 ## License
 

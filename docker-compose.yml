@@ -11,18 +11,22 @@ services:
     restart: unless-stopped
     environment:
       - TZ=Asia/Kolkata
-      # Server configuration
-      - SERVER_READ_TIMEOUT=600s    # 10 minutes
-      - SERVER_WRITE_TIMEOUT=600s   # 10 minutes
-      - SERVER_IDLE_TIMEOUT=120s    # 2 minutes
+      # Server configuration for large files
+      - SERVER_READ_TIMEOUT=1800s    # 30 minutes for very large files
+      - SERVER_WRITE_TIMEOUT=1800s   # 30 minutes for very large files
+      - SERVER_IDLE_TIMEOUT=120s     # 2 minutes idle timeout
       - SERVER_ADDR=0.0.0.0:8080
     deploy:
       resources:
         limits:
-          memory: 2G
+          memory: 4G    # Increased for large file handling
         reservations:
           memory: 512M
     ulimits:
       nofile:
         soft: 65536
         hard: 65536
+    # Add swap limit for better memory management
+    mem_swappiness: 60
+    # Increase shm size for better performance
+    shm_size: '256mb'
