@@ -2,23 +2,9 @@
 
 A serverless API service for uploading files to OneDrive with support for multiple remote configurations.
 
-## File Handling & Limits
+## API Endpoints
 
-### Capabilities
-- Maximum file size: 5GB
-- Binary file upload (supports all file types)
-- Chunk sizes: 2MB to 32MB
-- Parallel uploads: Up to 4 chunks
-- Progress tracking
-
-### Timeouts
-- Read timeout: 10 minutes
-- Write timeout: 10 minutes
-- Idle timeout: 2 minutes
-
-## API Endpoint
-
-### POST /upload
+### 1. POST /upload
 
 Upload any file to OneDrive as binary data.
 
@@ -29,21 +15,6 @@ X-Remote: [remote name] (required) - One of: hakimionedrive, oned, saurajcf
 X-Filename: [filename] (required) - Name for the uploaded file
 X-Remote-Folder: [folder path] (optional) - Target folder in OneDrive
 X-Chunk-Size: [size in MB] (required) - Chunk size (2-32)
-```
-
-**Request Body:**
-- Raw binary file content
-
-**Example using cURL:**
-```bash
-curl -X POST \
-  -H "Content-Type: application/octet-stream" \
-  -H "X-Remote: oned" \
-  -H "X-Filename: example.pdf" \
-  -H "X-Remote-Folder: documents" \
-  -H "X-Chunk-Size: 8" \
-  --data-binary "@/path/to/file.pdf" \
-  http://localhost:8080/upload
 ```
 
 **Success Response:**
@@ -57,11 +28,76 @@ curl -X POST \
 }
 ```
 
-**Error Response:**
+### 2. GET /system
+
+Get basic system information.
+
+**Success Response:**
 ```json
 {
-    "error": "Error message here",
-    "details": "Detailed error information"
+    "status": "success",
+    "data": {
+        "cpu": {
+            "model": "AMD Ryzen 9 5900X",
+            "cores": 12,
+            "usage": 25.5,
+            "load_percentage": ["10%", "15%", "25%"]
+        },
+        "memory": {
+            "total": 34359738368,
+            "used": 8589934592,
+            "free": 25769803776,
+            "used_percent": 25.0
+        },
+        "system": {
+            "hostname": "server-name",
+            "os": "linux",
+            "platform": "ubuntu",
+            "kernel": "5.15.0-1059",
+            "architecture": "amd64",
+            "server_time": "2025-01-26T02:35:00+05:30",
+            "uptime": 1234567
+        }
+    }
+}
+```
+
+### 3. GET /neofetch
+
+Get detailed system information in a neofetch-like format with ASCII art and styling.
+
+**Success Response:**
+```json
+{
+    "status": "success",
+    "data": {
+        "ascii_art": "...[ASCII art here]...",
+        "colors": {
+            "primary": "[38;2;0;255;0m",
+            "secondary": "[38;2;0;200;0m",
+            "accent": "[38;2;50;255;50m"
+        },
+        "system": {
+            "user": "username@hostname",
+            "hostname": "server-name",
+            "distro": "Ubuntu 22.04 LTS",
+            "kernel": "5.15.0-1059",
+            "uptime": "10 days, 5 hours, 30 minutes",
+            "shell": "/bin/bash",
+            "cpu": "AMD Ryzen 9 5900X (12) @ 3.70GHz",
+            "memory": "8.0 GiB / 32.0 GiB (25.0%)",
+            "disk_usage": "100.0 GiB / 500.0 GiB (20.0%)",
+            "local_ip": "192.168.1.100",
+            "server_time": "2025-01-26T02:35:00+05:30",
+            "load_average": [1.5, 1.2, 1.0]
+        },
+        "performance": {
+            "cpu_usage": 25.5,
+            "memory_usage": 25.0,
+            "cpu_frequency": 3700,
+            "core_loads": [20.5, 15.2, 30.1]
+        }
+    }
 }
 ```
 
@@ -97,100 +133,43 @@ docker-compose up -d
 ```
 
 Docker configuration provides:
-- Memory limits: 2GB max, 512MB reserved
+- Memory limits: 4GB max, 512MB reserved
 - File descriptor limits: 65536
 - Temporary file storage mapping
 - Configurable timeouts
 - Automatic restart on failure
 - Timezone configuration
 
-To stop the service:
+### Environment Variables
+
 ```bash
-docker-compose down
-```
-
-### Local Development
-
-1. Clone the repository and add your rclone.conf file
-
-2. Start the development server
-```bash
-go run main.go
+# Server configuration
+SERVER_READ_TIMEOUT=1800s    # For handling large files
+SERVER_WRITE_TIMEOUT=1800s   # For handling large responses
+SERVER_IDLE_TIMEOUT=120s     # Connection idle timeout
+SERVER_ADDR=0.0.0.0:8080    # Server binding address
 ```
 
 ## Performance Optimization
 
-### Chunk Size Selection Guidelines
-- Small files (< 100MB): 2-4MB chunks
-- Medium files (100MB - 1GB): 8-16MB chunks
-- Large files (> 1GB): 16-32MB chunks
-
-### Upload Performance
-- Parallel processing: 4 chunks simultaneously
-- Progress tracking for large files
+### Upload Optimization
+- Configurable chunk sizes (2-32MB)
+- Sequential chunk processing for reliability
+- Progress tracking
 - Automatic retry on failures
-- Memory-efficient binary handling
 
-## Error Handling and Security
+### System Information
+- Cached responses for system info
+- Real-time CPU and memory monitoring
+- Detailed performance metrics
+- ASCII art generation for frontend display
 
-### Error Handling
-- Detailed error messages
-- Upload progress tracking
-- Automatic cleanup of temporary files
-- Comprehensive request validation
-
-### Security Features
-- Binary file handling (no file type restrictions)
+## Security Features
+- Binary file handling
 - Request size validation
 - Memory usage controls
 - Temporary file cleanup
 - Read-only configuration mounting
-
-## Configuration
-
-The API supports multiple OneDrive remotes:
-
-```go
-var rootFolders = map[string]string{
-    "hakimionedrive": "Public",
-    "oned":           "",
-    "saurajcf":       "MY_BOMT_STUFFS",
-}
-
-var baseURLs = map[string]string{
-    "hakimionedrive": "https://onedrive-vercel-index-kohl-eight-30.vercel.app",
-    "oned":           "https://index.sauraj.eu.org",
-    "saurajcf":       "https://my-index-azure.vercel.app",
-}
-```
-
-## Environment Variables
-
-```bash
-# Server configuration
-SERVER_READ_TIMEOUT=600s    # For handling large file uploads
-SERVER_WRITE_TIMEOUT=600s   # For handling large responses
-SERVER_IDLE_TIMEOUT=120s    # Connection idle timeout
-SERVER_ADDR=0.0.0.0:8080   # Server binding address
-```
-
-## Advantages of Binary Upload
-
-1. Efficiency:
-   - No multipart form overhead
-   - Direct binary data handling
-   - Reduced memory usage
-   - Better performance for large files
-
-2. Compatibility:
-   - Works with any file type
-   - No content-type restrictions
-   - Consistent handling of all files
-
-3. Simplicity:
-   - Straightforward API
-   - Simple client implementation
-   - Clear error handling
 
 ## License
 

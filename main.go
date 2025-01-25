@@ -45,6 +45,20 @@ func getEnvDurationWithDefault(key string, defaultValue time.Duration) time.Dura
 	return defaultValue
 }
 
+type maxBytesHandler struct {
+	h http.Handler
+	n int64
+}
+
+func (h *maxBytesHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.ContentLength > h.n {
+		http.Error(w, "Request too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+	r.Body = http.MaxBytesReader(w, r.Body, h.n)
+	h.h.ServeHTTP(w, r)
+}
+
 func main() {
 	// Set up logging
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
@@ -59,6 +73,17 @@ func main() {
 		api.Handler(w, r)
 	})
 
+	// Add system info endpoints
+	mux.HandleFunc("/system", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Received system info request: %s %s", r.Method, r.URL.Path)
+		api.SystemHandler(w, r)
+	})
+
+	mux.HandleFunc("/neofetch", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Received neofetch request: %s %s", r.Method, r.URL.Path)
+		api.NeofetchHandler(w, r)
+	})
+
 	// Get server timeouts from environment variables
 	readTimeout := getEnvDurationWithDefault("SERVER_READ_TIMEOUT", defaultReadTimeout)
 	writeTimeout := getEnvDurationWithDefault("SERVER_WRITE_TIMEOUT", defaultWriteTimeout)
@@ -66,9 +91,18 @@ func main() {
 
 	// Create server with timeouts
 	addr := getEnvWithDefault("SERVER_ADDR", "0.0.0.0:8080")
+
+	// Set maximum request size to 5GB
+	maxRequestSize := int64(5 * 1024 * 1024 * 1024)
+
+	handler := &maxBytesHandler{
+		h: mux,
+		n: maxRequestSize,
+	}
+
 	server := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      handler,
 		ReadTimeout:  readTimeout,
 		WriteTimeout: writeTimeout,
 		IdleTimeout:  idleTimeout,
@@ -81,6 +115,7 @@ func main() {
 	log.Printf("- Read Timeout: %v", readTimeout)
 	log.Printf("- Write Timeout: %v", writeTimeout)
 	log.Printf("- Idle Timeout: %v", idleTimeout)
+	log.Printf("- Max Request Size: %d bytes", maxRequestSize)
 
 	// Channel to receive errors from the server
 	serverErrors := make(chan error, 1)
