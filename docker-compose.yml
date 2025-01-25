@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./rclone.conf:/app/rclone.conf:ro
+      - /tmp:/tmp  # For temporary file handling
+    restart: unless-stopped
+    environment:
+      - TZ=Asia/Kolkata
+      # Server configuration
+      - SERVER_READ_TIMEOUT=600s    # 10 minutes
+      - SERVER_WRITE_TIMEOUT=600s   # 10 minutes
+      - SERVER_IDLE_TIMEOUT=120s    # 2 minutes
+      - SERVER_ADDR=0.0.0.0:8080
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+        reservations:
+          memory: 512M
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
