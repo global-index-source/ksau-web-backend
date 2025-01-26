@@ -84,6 +84,11 @@ func main() {
 		api.NeofetchHandler(w, r)
 	})
 
+	mux.HandleFunc("/quota", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Received quota info request: %s %s", r.Method, r.URL.Path)
+		api.QuotaHandler(w, r)
+	})
+
 	// Get server timeouts from environment variables
 	readTimeout := getEnvDurationWithDefault("SERVER_READ_TIMEOUT", defaultReadTimeout)
 	writeTimeout := getEnvDurationWithDefault("SERVER_WRITE_TIMEOUT", defaultWriteTimeout)

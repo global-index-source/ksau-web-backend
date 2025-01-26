@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ksauraj/ksau-oned-api/azure"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
@@ -75,6 +76,19 @@ type Colors struct {
 	Primary   string `json:"primary"`
 	Secondary string `json:"secondary"`
 	Accent    string `json:"accent"`
+}
+
+// RemoteQuota represents quota information for a remote storage
+type RemoteQuotaInfo struct {
+	Status string                  `json:"status"`
+	Data   map[string]*RemoteQuota `json:"data"`
+}
+
+type RemoteQuota struct {
+	Total     string `json:"total"`
+	Used      string `json:"used"`
+	Remaining string `json:"remaining"`
+	Deleted   string `json:"deleted"`
 }
 
 // SystemHandler provides basic system information
@@ -181,6 +195,73 @@ func formatBytes(bytes uint64) string {
 }
 
 // NeofetchHandler provides detailed system information in a neofetch-like format
+// QuotaHandler returns quota information for all remotes
+func QuotaHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	response := RemoteQuotaInfo{
+		Status: "success",
+		Data:   make(map[string]*RemoteQuota),
+	}
+
+	// Create HTTP client
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+
+	// Read embedded config data
+	configData, err := os.ReadFile("rclone.conf")
+	if err != nil {
+		http.Error(w, "Failed to read rclone config", http.StatusInternalServerError)
+		return
+	}
+
+	// Get list of remotes from config
+	remotes := ParseRemotes(string(configData))
+
+	// Get quota for each remote
+	for _, remote := range remotes {
+		client, err := azure.NewAzureClientFromRcloneConfigData(configData, remote)
+		if err != nil {
+			log.Printf("Error creating Azure client for remote %s: %v", remote, err)
+			continue
+		}
+
+		quota, err := client.GetDriveQuota(httpClient)
+		if err != nil {
+			log.Printf("Error getting quota for remote %s: %v", remote, err)
+			continue
+		}
+
+		response.Data[remote] = &RemoteQuota{
+			Total:     formatBytes(uint64(quota.Total)),
+			Used:      formatBytes(uint64(quota.Used)),
+			Remaining: formatBytes(uint64(quota.Remaining)),
+			Deleted:   formatBytes(uint64(quota.Deleted)),
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
+
+// ParseRemotes extracts remote names from rclone config
+func ParseRemotes(config string) []string {
+	var remotes []string
+	lines := strings.Split(config, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") && strings.HasSuffix(line, "]") {
+			remote := strings.Trim(line, "[]")
+			if remote != "" {
+				remotes = append(remotes, remote)
+			}
+		}
+	}
+	return remotes
+}
+
 func NeofetchHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)

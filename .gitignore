@@ -50,4 +50,4 @@ Thumbs.db
 .vercel
 
 # Binaries
-ksau-oned-api
+./ksau-oned-api
