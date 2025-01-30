@@ -59,6 +59,12 @@ func main() {
 		api.Handler(w, r)
 	})
 
+	// Token generation endpoint
+	mux.HandleFunc("/token", func(w http.ResponseWriter, r *http.Request) {
+		log.Printf("Received token request: %s %s", r.Method, r.URL.Path)
+		api.TokenHandler(w, r)
+	})
+
 	// Get server timeouts from environment variables
 	readTimeout := getEnvDurationWithDefault("SERVER_READ_TIMEOUT", defaultReadTimeout)
 	writeTimeout := getEnvDurationWithDefault("SERVER_WRITE_TIMEOUT", defaultWriteTimeout)

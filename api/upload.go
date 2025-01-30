@@ -11,8 +11,117 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/ksauraj/ksau-oned-api/azure"
 )
+
+// JWT related constants
+const (
+	AccessTokenDuration  = 1 * time.Hour
+	RefreshTokenDuration = 24 * time.Hour
+	JWTSecretKey         = "your-secret-key-change-this-in-production" // Change this in production
+)
+
+// TokenResponse represents the response for token generation
+type TokenResponse struct {
+	AccessToken    string `json:"access_token"`
+	RefreshToken   string `json:"refresh_token"`
+	ExpiresIn      int64  `json:"expires_in"` // in seconds
+	ClientID       string `json:"client_id"`
+	ClientSecret   string `json:"client_secret"`
+	DriveID        string `json:"drive_id"`
+	DriveType      string `json:"drive_type"`
+	BaseURL        string `json:"base_url"`
+	UploadRootPath string `json:"upload_root_path"`
+}
+
+// CustomClaims represents the claims in the JWT token
+type CustomClaims struct {
+	TokenType string `json:"token_type"`
+	jwt.RegisteredClaims
+}
+
+// generateToken creates a new JWT token
+func generateToken(tokenType string, duration time.Duration) (string, error) {
+	claims := CustomClaims{
+		TokenType: tokenType,
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(duration)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(JWTSecretKey))
+}
+
+// TokenHandler handles token generation requests
+func TokenHandler(w http.ResponseWriter, r *http.Request) {
+	// Set CORS headers
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+	w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+	// Handle preflight requests
+	if r.Method == "OPTIONS" {
+		w.WriteHeader(http.StatusOK)
+		return
+	}
+
+	// Only allow GET requests
+	if r.Method != "GET" {
+		sendErrorResponse(w, http.StatusMethodNotAllowed, fmt.Errorf("method %s not allowed", r.Method), "Method not allowed")
+		return
+	}
+
+	// Get remote from query parameter
+	remote := r.URL.Query().Get("remote")
+	if remote == "" {
+		sendErrorResponse(w, http.StatusBadRequest, fmt.Errorf("remote parameter is required"), "Missing remote parameter")
+		return
+	}
+
+	// Validate remote
+	if _, ok := rootFolders[remote]; !ok {
+		sendErrorResponse(w, http.StatusBadRequest, fmt.Errorf("invalid remote: %s", remote), "Invalid remote")
+		return
+	}
+
+	// Read config file
+	configData, err := os.ReadFile("rclone.conf")
+	if err != nil {
+		sendErrorResponse(w, http.StatusInternalServerError, err, "Failed to read config file")
+		return
+	}
+
+	// Get Azure client for the remote
+	client, err := azure.NewAzureClientFromRcloneConfigData(configData, remote)
+	if err != nil {
+		sendErrorResponse(w, http.StatusInternalServerError, err, "Failed to initialize Azure client")
+		return
+	}
+
+	// Ensure token is refreshed if needed
+	if err := client.EnsureTokenValid(http.DefaultClient); err != nil {
+		sendErrorResponse(w, http.StatusInternalServerError, err, "Failed to refresh token")
+		return
+	}
+
+	response := TokenResponse{
+		AccessToken:    client.AccessToken,
+		RefreshToken:   client.RefreshToken,
+		ExpiresIn:      int64(time.Until(client.Expiration).Seconds()),
+		ClientID:       client.ClientID,
+		ClientSecret:   client.ClientSecret,
+		DriveID:        client.DriveID,
+		DriveType:      client.DriveType,
+		BaseURL:        baseURLs[remote],
+		UploadRootPath: rootFolders[remote],
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(response)
+}
 
 const (
 	// 1GB max file size
