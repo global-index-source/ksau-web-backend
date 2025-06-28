@@ -12,6 +12,9 @@ RUN go mod download
 # Copy the source code
 COPY . .
 
+# Copy rclone config (for build-time operations if needed)
+COPY rclone.conf .
+
 # Build the application
 RUN CGO_ENABLED=0 GOOS=linux go build -o main .
 
@@ -22,8 +25,6 @@ WORKDIR /app
 
 # Copy the binary from builder
 COPY --from=builder /app/main .
-# Copy rclone config
-COPY rclone.conf .
 
 # Run the application
 CMD ["./main"]
