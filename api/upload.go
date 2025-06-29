@@ -13,6 +13,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/ksauraj/ksau-oned-api/azure"
+	"github.com/ksauraj/ksau-oned-api/config"
 )
 
 // JWT related constants
@@ -87,12 +88,8 @@ func TokenHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Read config file
-	configData, err := os.ReadFile("rclone.conf")
-	if err != nil {
-		sendErrorResponse(w, http.StatusInternalServerError, err, "Failed to read config file")
-		return
-	}
+	// Get embedded config data
+	configData := config.GetRcloneConfig()
 
 	// Get Azure client for the remote
 	client, err := azure.NewAzureClientFromRcloneConfigData(configData, remote)
@@ -191,15 +188,12 @@ func Handler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("Reading config file...")
-	// Read the config file
-	configData, err := os.ReadFile("rclone.conf")
-	if err != nil {
-		sendErrorResponse(w, http.StatusInternalServerError, err, "Failed to read config file")
-		return
-	}
+	log.Printf("Getting embedded config data...")
+	// Get embedded config data
+	configData := config.GetRcloneConfig()
 
 	var (
+		err           error
 		remote        string
 		remoteFolder  string
 		filename      string
