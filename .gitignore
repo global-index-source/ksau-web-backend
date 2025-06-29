@@ -11,7 +11,7 @@
 *.out
 
 # Config files containing secrets
-rclone.conf
+config/rclone.conf
 *.bak
 
 # Docker

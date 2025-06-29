@@ -125,7 +125,10 @@ git clone https://github.com/ksauraj/ksau-oned-api.git
 cd ksau-oned-api
 ```
 
-2. Add your rclone.conf to the project root
+2. Add your rclone.conf to the config directory:
+```bash
+cp your-rclone.conf config/rclone.conf
+```
 
 3. Deploy using Docker Compose:
 ```bash

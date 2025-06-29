@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ksauraj/ksau-oned-api/azure"
+	"github.com/ksauraj/ksau-oned-api/config"
 	"github.com/shirou/gopsutil/v3/cpu"
 	"github.com/shirou/gopsutil/v3/disk"
 	"github.com/shirou/gopsutil/v3/host"
@@ -210,12 +211,8 @@ func QuotaHandler(w http.ResponseWriter, r *http.Request) {
 	// Create HTTP client
 	httpClient := &http.Client{Timeout: 30 * time.Second}
 
-	// Read embedded config data
-	configData, err := os.ReadFile("rclone.conf")
-	if err != nil {
-		http.Error(w, "Failed to read rclone config", http.StatusInternalServerError)
-		return
-	}
+	// Get embedded config data
+	configData := config.GetRcloneConfig()
 
 	// Get list of remotes from config
 	remotes := ParseRemotes(string(configData))
